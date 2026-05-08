@@ -34,6 +34,7 @@ public class CircuitBreakerService extends NexusIQServiceBase {
             cb.Status__c = 'OPEN';
             cb.Retry_After__c = DateTime.now().addMinutes(RETRY_MINUTES);
             System.debug('NexusIQ Circuit OPENED for: ' + systemName);
+            System.enqueueJob(new CircuitBreakerQueueable(systemName, 'OPEN', 'TXN-AUTO-' + systemName));
         }
         update cb;
     }
