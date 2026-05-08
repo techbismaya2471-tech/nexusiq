@@ -1,0 +1,17 @@
+# Salesforce SFDX
+.sf/
+.sfdx/
+.vscode/
+config/
+
+# Environment files — NEVER push
+.env
+.env.local
+.env.production
+
+# Node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
