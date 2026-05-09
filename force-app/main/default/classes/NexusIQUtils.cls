@@ -26,7 +26,9 @@ public class NexusIQUtils {
             Status__c            = status,
             Error_Message__c     = message,
             Request_Body__c      = requestBody,
-            Response_Body__c     = responseBody,
+            Response_Body__c = responseBody != null && responseBody.length() > 2000
+            ? responseBody.substring(0, 2000)
+            : responseBody,
             HTTP_Method__c       = systemName
         );
         insert logRecord;
