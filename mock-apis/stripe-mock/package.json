@@ -1,0 +1,16 @@
+{
+  "name": "stripe-mock",
+  "version": "1.0.0",
+  "description": "Mock Stripe Payment API for NexusIQ Integration Testing",
+  "license": "MIT",
+  "author": "BIsmaya",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  }
+}
