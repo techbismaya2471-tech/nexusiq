@@ -1,0 +1,16 @@
+{
+  "name": "twilio-mock",
+  "version": "1.0.0",
+  "description": "Mock APi for twillio",
+  "license": "MIT",
+  "author": "BIsmaya",
+  "type": "commonjs",
+  "main": "Server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  }
+}
