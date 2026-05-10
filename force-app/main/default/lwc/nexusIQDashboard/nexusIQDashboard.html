@@ -1,0 +1,154 @@
+<template>
+    <div class="dashboard-container">
+        
+        <!-- HEADER -->
+        <div class="dashboard-header">
+            <div class="header-left">
+                <span class="header-logo">N</span>
+                <div>
+                    <div class="header-title">NEXUSIQ COMMAND CENTER</div>
+                    <div class="header-sub">Autonomous Integration Intelligence Platform</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <span class="live-dot"></span>
+                <span class="live-text">LIVE</span>
+                <span class="refresh-time">Last updated: {lastRefreshed}</span>
+                <lightning-button-icon
+                    icon-name="utility:refresh"
+                    onclick={handleRefresh}
+                    alternative-text="Refresh"
+                    class="refresh-btn">
+                </lightning-button-icon>
+            </div>
+        </div>
+
+        <!-- LOADING -->
+        <template if:true={isLoading}>
+            <div class="loading-container">
+                <lightning-spinner alternative-text="Loading..." size="medium"></lightning-spinner>
+                <p class="loading-text">Loading NexusIQ data...</p>
+            </div>
+        </template>
+
+        <!-- ERROR -->
+        <template if:true={error}>
+            <div class="error-container">
+                <lightning-icon icon-name="utility:error" size="small"></lightning-icon>
+                <span>{error}</span>
+            </div>
+        </template>
+
+        <template if:false={isLoading}>
+
+            <!-- SUMMARY CARDS -->
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="summary-value">{summary.totalLogsToday}</div>
+                    <div class="summary-label">Total Calls Today</div>
+                </div>
+                <div class="summary-card summary-success">
+                    <div class="summary-value">{summary.successLogsToday}</div>
+                    <div class="summary-label">Successful</div>
+                </div>
+                <div class="summary-card summary-failed">
+                    <div class="summary-value">{summary.failedLogsToday}</div>
+                    <div class="summary-label">Failed</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-value">{summary.activeSagas}</div>
+                    <div class="summary-label">Active SAGAs</div>
+                </div>
+                <div class="summary-card summary-alert">
+                    <div class="summary-value">{summary.openCircuits}</div>
+                    <div class="summary-label">Open Circuits</div>
+                </div>
+            </div>
+
+            <!-- CIRCUIT BREAKER STATUS -->
+            <div class="section-title">Circuit Breaker Status</div>
+            <div class="cb-grid">
+                <template for:each={circuitBreakers} for:item="cb">
+                    <div key={cb.name} class={cb.statusClass}>
+                        <div class="cb-top">
+                            <div class="cb-name">{cb.name}</div>
+                            <div class={cb.badgeClass}>{cb.status}</div>
+                        </div>
+                        <div class="cb-failures">
+                            Failures: {cb.failureCount} / 5
+                        </div>
+                        <div class="cb-times">
+                            <span>Last Success: {cb.lastSuccessTime}</span>
+                        </div>
+                        <div class="cb-times">
+                            <span>Last Failure: {cb.lastFailureTime}</span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- SAGA TRANSACTIONS -->
+            <div class="section-title">SAGA Transactions</div>
+            <div class="saga-container">
+                <template for:each={recentSagas} for:item="saga">
+                    <div key={saga.correlationId} class="saga-row">
+                        <div class="saga-left">
+                            <template if:true={saga.isRunning}>
+                                <span class="status-dot dot-running"></span>
+                            </template>
+                            <template if:true={saga.isCompleted}>
+                                <span class="status-dot dot-success"></span>
+                            </template>
+                            <template if:true={saga.isFailed}>
+                                <span class="status-dot dot-failed"></span>
+                            </template>
+                            <span class="saga-id">{saga.correlationId}</span>
+                        </div>
+                        <div class="saga-middle">
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style={saga.progressStyle}>                           </div>
+                            </div>
+                            <span class="saga-steps">
+                                Step {saga.currentStep} / {saga.totalSteps}
+                            </span>
+                        </div>
+                        <div class="saga-right">
+                            <span class="saga-status">{saga.status}</span>
+                            <span class="saga-date">{saga.createdDate}</span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- INTEGRATION LOGS -->
+            <div class="section-title">Integration Audit Log</div>
+            <div class="logs-container">
+                <table class="logs-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>System</th>
+                            <th>Method</th>
+                            <th>HTTP</th>
+                            <th>Status</th>
+                            <th>Correlation ID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={recentLogs} for:item="log">
+                            <tr key={log.correlationId} class={log.statusClass}>
+                                <td>{log.createdDate}</td>
+                                <td class="sys-name">{log.systemName}</td>
+                                <td>{log.httpMethod}</td>
+                                <td>{log.httpStatusCode}</td>
+                                <td>{log.status}</td>
+                                <td class="corr-id">{log.correlationId}</td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+        </template>
+    </div>
+</template>
