@@ -40,6 +40,12 @@ public class SagaOrchestratorService extends NexusIQServiceBase {
         saga.Compensation_Status__c = 'IN_PROGRESS';
         update saga;
         NexusIQEventPublisher.publishSagaFailed(correlationId, 'SYSTEM', errorMessage);
+        DLQProcessor.addToDLQ(
+                            correlationId,
+                            saga.Payload__c,
+                            errorMessage,
+                            correlationId
+                        );
         
         System.debug('NexusIQ SAGA Failed: ' + correlationId + ' | Compensation Starting...');
     }

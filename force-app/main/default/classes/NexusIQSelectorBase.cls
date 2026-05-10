@@ -8,7 +8,8 @@ public virtual class NexusIQSelectorBase {
                    Last_Failure_Time__c, Threshold_Count__c,
                    Is_Active__c
             FROM Circuit_Breaker__c
-            WHERE System_Name__c = :systemName
+            //WHERE System_Name__c = :systemName
+            WHERE  Name= :systemName
             AND Is_Active__c = true
             LIMIT 1
         ];
