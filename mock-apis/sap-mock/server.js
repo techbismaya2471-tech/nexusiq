@@ -4,6 +4,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ─────────────────────────────────────
 // OAUTH 2.0 — TOKEN ENDPOINT
