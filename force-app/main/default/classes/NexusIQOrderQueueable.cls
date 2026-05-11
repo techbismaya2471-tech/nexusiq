@@ -119,7 +119,8 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             NexusIQ_Order__c orderToUpdate = new NexusIQ_Order__c(
                 Id = order.Id,
                 Status__c = 'Completed',
-                Correlation_Id__c = corrId
+                Correlation_Id__c = corrId,
+                Error_Message__c = '' 
             );
             update orderToUpdate;
 

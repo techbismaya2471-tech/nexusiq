@@ -5,20 +5,24 @@ public class CircuitBreakerService extends NexusIQServiceBase {
     
     // CHECK — Is system ka circuit OPEN hai ya CLOSED?
     public static Boolean isCircuitOpen(String systemName) {
-        Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
-        
-        if(cb == null) return false;
-        
-        if(cb.Status__c == 'OPEN') {
-            // Retry time aa gaya? HALF_OPEN karo
-            if(cb.Retry_After__c <= DateTime.now()) {
-                updateCircuitStatus(cb, 'HALF_OPEN');
+            Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
+            
+                if(cb == null) return false;
+                
+                if(cb.Status__c == 'OPEN') {
+                    // Retry time aa gaya? HALF_OPEN — no DML here!
+                    if(cb.Retry_After__c <= DateTime.now()) {
+                        return false; // Allow test call — HALF_OPEN update baad mein
+                    }
+                    return true;
+                }
+                
+                if(cb.Status__c == 'HALF_OPEN') {
+                    return false; // Test call allow karo
+                }
+                
                 return false;
             }
-            return true;
-        }
-        return false;
-    }
     
     // RECORD — Failure hua
     public static void recordFailure(String systemName) {
