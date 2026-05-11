@@ -6,6 +6,45 @@ app.use(cors());
 app.use(express.json());
 
 // ─────────────────────────────────────
+// OAUTH 2.0 — TOKEN ENDPOINT
+// ─────────────────────────────────────
+const VALID_CLIENTS = {
+  'nexusiq_client_id': 'nexusiq_client_secret'
+};
+
+app.post('/oauth/token', (req, res) => {
+  const { client_id, client_secret, grant_type } = req.body;
+
+  console.log(`[SAP MOCK] OAuth Token Request | Client: ${client_id}`);
+
+  // Grant type check
+  if (grant_type !== 'client_credentials') {
+    return res.status(400).json({
+      error: 'unsupported_grant_type',
+      error_description: 'Only client_credentials supported'
+    });
+  }
+
+  // Client credentials validate karo
+  if (!VALID_CLIENTS[client_id] || VALID_CLIENTS[client_id] !== client_secret) {
+    return res.status(401).json({
+      error: 'invalid_client',
+      error_description: 'Invalid client credentials'
+    });
+  }
+
+  // Token generate karo
+  const token = 'mock_token_' + Date.now() + '_' + Math.random().toString(36).substring(7);
+
+  res.json({
+    access_token: token,
+    token_type: 'Bearer',
+    expires_in: 3600,
+    scope: 'sap:read sap:write'
+  });
+});
+
+// ─────────────────────────────────────
 // HEALTH CHECK
 // ─────────────────────────────────────
 app.get('/api/sap/health', (req, res) => {
