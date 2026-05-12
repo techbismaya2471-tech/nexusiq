@@ -15,7 +15,7 @@ trigger NexusIQEventTrigger on NexusIQ_Event__e (after insert) {
         
         // SAGA fail hua — compensation shuru karo
         if(eventType == 'SAGA_FAILED') {
-            SagaOrchestratorService.failSaga(correlationId, event.Payload__c);
+            //SagaOrchestratorService.failSaga(correlationId, event.Payload__c);
             System.debug('NexusIQ SAGA Compensation Triggered: ' + correlationId);
         }
         

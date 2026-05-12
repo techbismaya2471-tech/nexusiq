@@ -25,24 +25,43 @@ public class CircuitBreakerService extends NexusIQServiceBase {
             }
     
     // RECORD — Failure hua
-    public static void recordFailure(String systemName) {
-        Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
-        
-        if(cb == null) return;
-        
-        cb.Failure_Count__c = (cb.Failure_Count__c == null ? 0 : cb.Failure_Count__c) + 1;
-        cb.Last_Failure_Time__c = DateTime.now();
-        
-        // Threshold cross hua? OPEN karo
-        if(cb.Failure_Count__c >= FAILURE_THRESHOLD) {
-            cb.Status__c = 'OPEN';
-            cb.Retry_After__c = DateTime.now().addMinutes(RETRY_MINUTES);
-            System.debug('NexusIQ Circuit OPENED for: ' + systemName);
-            System.enqueueJob(new CircuitBreakerQueueable(systemName, 'OPEN', 'TXN-AUTO-' + systemName));
-            NexusIQEventPublisher.publishCircuitOpen('TXN-AUTO-' + systemName, systemName);
-        }
-        update cb;
+    public static void recordFailure(String systemName, String correlationId, String payload) {
+    Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
+    
+    if(cb == null) return;
+    
+    cb.Failure_Count__c = (cb.Failure_Count__c == null ? 0 : cb.Failure_Count__c) + 1;
+    cb.Last_Failure_Time__c = DateTime.now();
+    
+    if(cb.Failure_Count__c >= FAILURE_THRESHOLD) {
+        cb.Status__c = 'OPEN';
+        cb.Retry_After__c = DateTime.now().addMinutes(RETRY_MINUTES);
+        System.debug('NexusIQ Circuit OPENED for: ' + systemName);
+        System.enqueueJob(new CircuitBreakerQueueable(systemName, 'OPEN', correlationId, payload));
+        NexusIQEventPublisher.publishCircuitOpen(correlationId, systemName);
     }
+    update cb;
+}
+    // public static void recordFailure(String systemName, String correlationId) {
+    //     Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
+        
+    //     if(cb == null) return;
+        
+    //     cb.Failure_Count__c = (cb.Failure_Count__c == null ? 0 : cb.Failure_Count__c) + 1;
+    //     cb.Last_Failure_Time__c = DateTime.now();
+        
+    //     // Threshold cross hua? OPEN karo
+    //     if(cb.Failure_Count__c >= FAILURE_THRESHOLD) {
+    //         cb.Status__c = 'OPEN';
+    //         cb.Retry_After__c = DateTime.now().addMinutes(RETRY_MINUTES);
+    //         System.debug('NexusIQ Circuit OPENED for: ' + systemName);
+    //         // System.enqueueJob(new CircuitBreakerQueueable(systemName, 'OPEN', 'TXN-AUTO-' + systemName));
+    //         // NexusIQEventPublisher.publishCircuitOpen('TXN-AUTO-' + systemName, systemName);
+    //         System.enqueueJob(new CircuitBreakerQueueable(systemName, 'OPEN', correlationId,payload));
+    //          NexusIQEventPublisher.publishCircuitOpen(correlationId, systemName);
+    //     }
+    //     update cb;
+    // }
     
     // RESET — Success hua
     public static void recordSuccess(String systemName) {

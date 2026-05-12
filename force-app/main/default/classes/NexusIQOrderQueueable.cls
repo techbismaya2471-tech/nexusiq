@@ -19,8 +19,8 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             }
             HttpRequest sapReq = new HttpRequest();
             sapReq.setEndpoint('callout:SAP_NC/api/sap/stock-check?item=' + 
-                              order.Item__c + '&quantity=' + 
-                              order.Quantity__c + '&correlationId=' + corrId);
+                  order.Item__c + '&quantity=' + 
+                  order.Quantity__c + '&correlationId=' + corrId);
             sapReq.setMethod('GET');
             sapReq.setTimeout(10000);
             HttpResponse sapRes = new Http().send(sapReq);
@@ -92,6 +92,7 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
         } catch(Exception e) {
             success = false;
             errorMessage = e.getMessage();
+            NexusIQUtils.log(corrId, failedSystem, 'FAILED', e.getMessage(), null, null);
         }
 
         // ── SAARE CALLOUTS KE BAAD — DML ───────────
@@ -127,7 +128,12 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
         } else {
             // CB Failure update
             if(String.isNotBlank(failedSystem)) {
-                CircuitBreakerService.recordFailure(failedSystem);
+                String orderPayload = '{"item":"' + order.Item__c + 
+                     '","qty":' + order.Quantity__c + 
+                     ',"customer":"' + order.Customer_Name__c + 
+                     '","amount":' + order.Amount__c + 
+                     ',"orderId":"' + order.Id + '"}';
+                CircuitBreakerService.recordFailure(failedSystem, corrId, orderPayload);
             }
 
             // SAGA fail

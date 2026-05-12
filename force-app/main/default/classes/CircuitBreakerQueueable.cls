@@ -3,11 +3,13 @@ public class CircuitBreakerQueueable implements Queueable {
     private String systemName;
     private String action;
     private String correlationId;
+    private String payload;
     
-    public CircuitBreakerQueueable(String systemName, String action, String correlationId) {
+    public CircuitBreakerQueueable(String systemName, String action, String correlationId, String payload) {
         this.systemName = systemName;
         this.action = action;
         this.correlationId = correlationId;
+        this.payload = payload;
     }
     
     public void execute(QueueableContext context) {
@@ -27,6 +29,7 @@ public class CircuitBreakerQueueable implements Queueable {
         List<Dead_Letter_Queue__c> existing = [
             SELECT Id FROM Dead_Letter_Queue__c 
             WHERE Correlation_Id__c = :correlationId
+            AND System_Name__c = :systemName
             LIMIT 1
         ];
         if(!existing.isEmpty()) return;
@@ -39,6 +42,7 @@ public class CircuitBreakerQueueable implements Queueable {
         dlq.System_Name__c     = systemName;
         dlq.Status__c          = 'PENDING';
         dlq.Correlation_Id__c  = correlationId;
+        dlq.Payload__c         = payload;
         dlq.Retry_Count__c     = 0;
         dlq.Max_Retries__c     = 3;
         dlq.Next_Retry_Time__c = DateTime.now().addMinutes(5);
