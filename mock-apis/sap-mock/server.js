@@ -44,7 +44,20 @@ app.post('/oauth/token', (req, res) => {
     scope: 'sap:read sap:write'
   });
 });
+// ─────────────────────────────────────
+// FAIL MODE CONTROL
+// ─────────────────────────────────────
+app.post('/api/sap/fail-mode/on', (req, res) => {
+  globalFailMode = true;
+  console.log('[SAP MOCK] ❌ FAIL MODE ON — all calls will return 503');
+  res.json({ status: 'FAIL_MODE_ON', message: 'SAP will now return 503' });
+});
 
+app.post('/api/sap/fail-mode/off', (req, res) => {
+  globalFailMode = false;
+  console.log('[SAP MOCK] ✅ FAIL MODE OFF — SAP back to normal');
+  res.json({ status: 'FAIL_MODE_OFF', message: 'SAP back to normal' });
+});
 // ─────────────────────────────────────
 // HEALTH CHECK
 // ─────────────────────────────────────
@@ -67,7 +80,10 @@ app.get('/api/sap/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-
+// ─────────────────────────────────────
+// GLOBAL FAIL MODE FLAG
+// ─────────────────────────────────────
+let globalFailMode = false;
 // ─────────────────────────────────────
 // STOCK DATABASE — DYNAMIC
 // ─────────────────────────────────────
@@ -86,7 +102,14 @@ app.get('/api/sap/stock-check', (req, res) => {
   const simulateFailure = req.query.simulateFailure === 'true';
 
   console.log(`[SAP MOCK] Stock Check | Item: ${item} | Qty: ${quantity} | CorrID: ${correlationId}`);
-
+if (globalFailMode) {
+    return res.status(503).json({
+      success: false,
+      correlationId,
+      error: 'SAP_CONNECTION_TIMEOUT',
+      message: 'SAP system not responding — global fail mode ON'
+    });
+  }
   if (simulateFailure) {
     return res.status(503).json({
       success: false,
