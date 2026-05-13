@@ -1,11 +1,12 @@
-public class DLQProcessor implements Schedulable, Database.Batchable<sObject> {
+public class DLQProcessor implements Schedulable, 
+    Database.Batchable<sObject>, Database.AllowsCallouts {
 
-    // ── SCHEDULABLE — Har 5 min mein run hoga ─────────
+    // ── SCHEDULABLE ────────────────────────────────────
     public void execute(SchedulableContext sc) {
         Database.executeBatch(new DLQProcessor(), 10);
     }
 
-    // ── BATCH START — Process karne layak records lo ──
+    // ── BATCH START ────────────────────────────────────
     public Database.QueryLocator start(Database.BatchableContext bc) {
         DateTime now = DateTime.now();
         return Database.getQueryLocator([
@@ -20,59 +21,90 @@ public class DLQProcessor implements Schedulable, Database.Batchable<sObject> {
         ]);
     }
 
-    // ── BATCH EXECUTE — Har record ko retry karo ──────
-    public void execute(Database.BatchableContext bc, 
+    // ── BATCH EXECUTE ──────────────────────────────────
+    public void execute(Database.BatchableContext bc,
                         List<Dead_Letter_Queue__c> dlqRecords) {
-        List<Dead_Letter_Queue__c> toUpdate = new List<Dead_Letter_Queue__c>();
+
+        List<Dead_Letter_Queue__c> toUpdate    = new List<Dead_Letter_Queue__c>();
+        List<NexusIQ_Order__c>    orderUpdates = new List<NexusIQ_Order__c>();
 
         for(Dead_Letter_Queue__c dlq : dlqRecords) {
-            Integer retryCount = dlq.Retry_Count__c != null ? 
+            Integer retryCount = dlq.Retry_Count__c != null ?
                                  Integer.valueOf(dlq.Retry_Count__c) : 0;
-            Integer maxRetries = dlq.Max_Retries__c != null ? 
+            Integer maxRetries = dlq.Max_Retries__c != null ?
                                  Integer.valueOf(dlq.Max_Retries__c) : 3;
 
+            // New corrId for this retry attempt
+            String newCorrId = NexusIQUtils.generateCorrelationId();
+
             try {
-                // Retry attempt
-                Boolean success = retryCallout(dlq);
+                Boolean success = retryCallout(dlq, newCorrId);
 
-                if(success) {
-                    // SUCCESS — DLQ resolve karo
-                    dlq.Status__c     = 'RESOLVED';
-                    dlq.Resolved_At__c = DateTime.now();
-                    NexusIQUtils.log(
-                                    dlq.Correlation_Id__c,
-                                    dlq.System_Name__c,
-                                    'SUCCESS',
-                                    'DLQ retry succeeded',
-                                    null,
-                                    null
-                                );
-                } else {
-                    // FAILED — retry count badhao
-                    retryCount++;
-                    dlq.Retry_Count__c = retryCount;
+               if(success) {
+    // ── DLQ RESOLVED ───────────────────
+    dlq.Status__c        = 'RESOLVED';
+    dlq.Resolved_At__c   = DateTime.now();
+    dlq.Error_Message__c = ''; // FIXED — clear error message!
+    NexusIQUtils.log(
+        newCorrId, dlq.System_Name__c,
+        'SUCCESS', 'DLQ retry succeeded', null, null
+    );
 
-                    if(retryCount >= maxRetries) {
-                        // Max retries reached — DEAD
-                        dlq.Status__c      = 'DEAD';
-                        dlq.Error_Message__c = 'Max retries (' + maxRetries + 
-                                              ') reached. Permanently failed.';
-                        NexusIQUtils.log(
-                                    dlq.Correlation_Id__c,
-                                    dlq.System_Name__c,
-                                    'FAILED',
-                                    dlq.Error_Message__c,
-                                    null,
-                                    null
-                                );
-                    } else {
-                        // Exponential backoff — next retry time calculate karo
-                        dlq.Status__c          = 'PENDING';
-                        dlq.Next_Retry_Time__c = calculateNextRetry(retryCount);
-                        dlq.Error_Message__c   = 'Retry ' + retryCount + 
-                                                '/' + maxRetries + ' failed.';
-                    }
-                }
+    // ── CB Reset ───────────────────────
+    CircuitBreakerService.recordSuccess('SAP');
+    CircuitBreakerService.recordSuccess('Stripe');
+    CircuitBreakerService.recordSuccess('S3');
+    CircuitBreakerService.recordSuccess('Twilio');
+
+    // ── SAGA COMPLETED ─────────────────
+    // NAYA:
+    SagaOrchestratorService.recoverSaga(
+    dlq.Correlation_Id__c);
+    // SagaOrchestratorService.completeSagaCompensation(
+    //     dlq.Correlation_Id__c
+    // );
+
+    // ── Order COMPLETED ────────────────
+    if(String.isNotBlank(dlq.Payload__c)) {
+        Map<String, Object> p =
+            (Map<String, Object>) JSON.deserializeUntyped(dlq.Payload__c);
+        String orderId = (String) p.get('orderId');
+        if(String.isNotBlank(orderId)) {
+            orderUpdates.add(new NexusIQ_Order__c(
+                Id                = orderId,
+                Status__c         = 'Completed',
+                Correlation_Id__c = newCorrId,
+                Error_Message__c  = 'Recovered via DLQ retry'
+            ));
+        }
+    }
+}else {
+    retryCount++;
+    dlq.Retry_Count__c = retryCount;
+    
+    // ── CB Failure count++ ─────────────
+    CircuitBreakerService.recordFailure(
+        dlq.System_Name__c, 
+        newCorrId, 
+        dlq.Payload__c
+    );
+
+    if(retryCount >= maxRetries) {
+        dlq.Status__c = 'DEAD';
+        dlq.Error_Message__c = 'Max retries (' + maxRetries + 
+                               ') reached. Permanently failed.';
+        NexusIQUtils.log(
+            newCorrId, dlq.System_Name__c,
+            'FAILED', dlq.Error_Message__c, null, null
+        );
+    } else {
+        dlq.Status__c = 'PENDING';
+        dlq.Next_Retry_Time__c = calculateNextRetry(retryCount);
+        dlq.Error_Message__c = 'Retry ' + retryCount +
+                               '/' + maxRetries + ' failed.';
+    }
+}
+
             } catch(Exception e) {
                 retryCount++;
                 dlq.Retry_Count__c   = retryCount;
@@ -89,10 +121,10 @@ public class DLQProcessor implements Schedulable, Database.Batchable<sObject> {
             toUpdate.add(dlq);
         }
 
-        if(!toUpdate.isEmpty()) {
-            update toUpdate;
-            NexusIQUtils.flushLogs();
-        }
+        // ── DML — CALLOUTS KE BAAD ─────────────────────
+        if(!toUpdate.isEmpty())    update toUpdate;
+        if(!orderUpdates.isEmpty()) update orderUpdates;
+        NexusIQUtils.flushLogs();
     }
 
     // ── BATCH FINISH ───────────────────────────────────
@@ -100,65 +132,91 @@ public class DLQProcessor implements Schedulable, Database.Batchable<sObject> {
         System.debug('DLQProcessor batch complete.');
     }
 
-    // ── EXPONENTIAL BACKOFF CALCULATOR ─────────────────
-    // Retry 1 → 2 min
-    // Retry 2 → 4 min
-    // Retry 3 → 8 min (max)
+    // ── EXPONENTIAL BACKOFF ────────────────────────────
     private DateTime calculateNextRetry(Integer retryCount) {
         Integer baseMinutes = 2;
         Integer waitMinutes = (Integer) Math.pow(2, retryCount - 1) * baseMinutes;
-        waitMinutes = Math.min(waitMinutes, 480); // Max 8 hours
+        waitMinutes = Math.min(waitMinutes, 480);
         return DateTime.now().addMinutes(waitMinutes);
     }
 
-    // ── ACTUAL RETRY CALLOUT ───────────────────────────
-    private Boolean retryCallout(Dead_Letter_Queue__c dlq) {
+    // ── REAL RETRY — SAP → Stripe → S3 → Twilio ───────
+    private Boolean retryCallout(Dead_Letter_Queue__c dlq, String newCorrId) {
         try {
-            String sys = dlq.System_Name__c;
+            // ── Payload Parse ──────────────────────────
+            Map<String, Object> p =
+                (Map<String, Object>) JSON.deserializeUntyped(dlq.Payload__c);
+            String item     = (String) p.get('item');
+            //String qty      = String.valueOf(p.get('qty'));
+            Integer qtyInt = Integer.valueOf(String.valueOf(p.get('qty')).replace('.0',''));
+                String qty = String.valueOf(qtyInt);
+            String customer = (String) p.get('customer');
+            String amount   = String.valueOf(p.get('amount'));
 
-            if(sys == 'SAP') {
-                HttpRequest req = new HttpRequest();
-                req.setEndpoint('callout:SAP_NC/api/sap/health');
-                req.setMethod('GET');
-                req.setTimeout(10000);
-                HttpResponse res = new Http().send(req);
-                return res.getStatusCode() == 200;
+            // ── SAP Stock Check ────────────────────────
+            HttpRequest sapReq = new HttpRequest();
+            sapReq.setEndpoint('callout:SAP_NC/api/sap/stock-check?item=' +
+                item + '&quantity=' + qty + '&correlationId=' + newCorrId);
+            sapReq.setMethod('GET');
+            sapReq.setTimeout(10000);
+            HttpResponse sapRes = new Http().send(sapReq);
+            if(sapRes.getStatusCode() != 200) return false;
+            NexusIQUtils.log(newCorrId, 'SAP', 'SUCCESS',
+                'DLQ Retry - Stock check done', null, sapRes.getBody());
 
-            } else if(sys == 'Stripe') {
-                HttpRequest req = new HttpRequest();
-                req.setEndpoint('callout:STRIPE_NC/api/stripe/health');
-                req.setMethod('GET');
-                req.setTimeout(10000);
-                HttpResponse res = new Http().send(req);
-                return res.getStatusCode() == 200;
+            // ── Stripe Payment ─────────────────────────
+            HttpRequest stripeReq = new HttpRequest();
+            stripeReq.setEndpoint('callout:STRIPE_NC/api/stripe/charge');
+            stripeReq.setMethod('POST');
+            stripeReq.setHeader('Content-Type', 'application/json');
+            stripeReq.setBody('{"correlationId":"' + newCorrId +
+                '","amount":' + amount +
+                ',"currency":"INR","customer":"' + customer + '"}');
+            stripeReq.setTimeout(10000);
+            HttpResponse stripeRes = new Http().send(stripeReq);
+            if(stripeRes.getStatusCode() != 200) return false;
+            NexusIQUtils.log(newCorrId, 'Stripe', 'SUCCESS',
+                'DLQ Retry - Payment charged', null, stripeRes.getBody());
 
-            } else if(sys == 'Twilio') {
-                HttpRequest req = new HttpRequest();
-                req.setEndpoint('callout:TWILIO_NC/api/twilio/health');
-                req.setMethod('GET');
-                req.setTimeout(10000);
-                HttpResponse res = new Http().send(req);
-                return res.getStatusCode() == 200;
+            // ── S3 Upload ──────────────────────────────
+            HttpRequest s3Req = new HttpRequest();
+            s3Req.setEndpoint('callout:S3_NC/api/s3/upload');
+            s3Req.setMethod('POST');
+            s3Req.setHeader('Content-Type', 'application/json');
+            s3Req.setBody('{"correlationId":"' + newCorrId +
+                '","fileName":"contract_' + newCorrId +
+                '.pdf","content":"Base64Contract","folder":"contracts"}');
+            s3Req.setTimeout(10000);
+            HttpResponse s3Res = new Http().send(s3Req);
+            if(s3Res.getStatusCode() != 200) return false;
+            NexusIQUtils.log(newCorrId, 'S3', 'SUCCESS',
+                'DLQ Retry - Contract uploaded', null, s3Res.getBody());
 
-            } else if(sys == 'S3') {
-                HttpRequest req = new HttpRequest();
-                req.setEndpoint('callout:S3_NC/api/s3/health');
-                req.setMethod('GET');
-                req.setTimeout(10000);
-                HttpResponse res = new Http().send(req);
-                return res.getStatusCode() == 200;
-            }
+            // ── Twilio SMS ─────────────────────────────
+            HttpRequest twilioReq = new HttpRequest();
+            twilioReq.setEndpoint('callout:TWILIO_NC/api/twilio/sms');
+            twilioReq.setMethod('POST');
+            twilioReq.setHeader('Content-Type', 'application/json');
+            twilioReq.setBody('{"correlationId":"' + newCorrId +
+                '","to":"+919876543210","message":"Order recovered! ' +
+                item + ' x' + qty + '. Ref: ' + newCorrId + '"}');
+            twilioReq.setTimeout(10000);
+            HttpResponse twilioRes = new Http().send(twilioReq);
+            if(twilioRes.getStatusCode() != 200) return false;
+            NexusIQUtils.log(newCorrId, 'Twilio', 'SUCCESS',
+                'DLQ Retry - SMS sent', null, twilioRes.getBody());
 
-            return false;
+            return true;
+
         } catch(Exception e) {
             return false;
         }
     }
 
     // ── STATIC HELPER — DLQ mein add karo ─────────────
-    public static void addToDLQ(String systemName, 
+    public static void addToDLQ(String systemName,
                                  String payload,
-                                 String errorMessage, 
+                                 String errorMessage,
                                  String correlationId) {
         Dead_Letter_Queue__c dlq = new Dead_Letter_Queue__c();
         dlq.System_Name__c     = systemName;

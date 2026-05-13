@@ -11,10 +11,14 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
         Boolean success = true;
         String errorMessage = '';
         String failedSystem = '';
+        Integer completedSteps = 0;
+        Integer failedStep = 0;
         
         try {
-            // ── STEP 1: SAP Stock Check ─────────────
+            // ── STEP 1: SAP ─────────────────────────
             if(CircuitBreakerService.isCircuitOpen('SAP')) {
+                failedSystem = 'SAP';
+                failedStep = 1;
                 throw new NexusIQException('SAP Circuit OPEN — fast fail');
             }
             HttpRequest sapReq = new HttpRequest();
@@ -26,12 +30,15 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             HttpResponse sapRes = new Http().send(sapReq);
             if(sapRes.getStatusCode() != 200) {
                 failedSystem = 'SAP';
+                failedStep = 1;
                 throw new NexusIQException('SAP failed: ' + sapRes.getStatusCode());
             }
-            NexusIQUtils.log(corrId, 'SAP', 'SUCCESS', 'Stock check done', null, sapRes.getBody());
+            completedSteps = 1;
 
-            // ── STEP 2: Stripe Payment ──────────────
+            // ── STEP 2: Stripe ──────────────────────
             if(CircuitBreakerService.isCircuitOpen('Stripe')) {
+                failedSystem = 'Stripe';
+                failedStep = 2;
                 throw new NexusIQException('Stripe Circuit OPEN — fast fail');
             }
             HttpRequest stripeReq = new HttpRequest();
@@ -46,12 +53,15 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             HttpResponse stripeRes = new Http().send(stripeReq);
             if(stripeRes.getStatusCode() != 200) {
                 failedSystem = 'Stripe';
+                failedStep = 2;
                 throw new NexusIQException('Stripe failed: ' + stripeRes.getStatusCode());
             }
-            NexusIQUtils.log(corrId, 'Stripe', 'SUCCESS', 'Payment charged', null, stripeRes.getBody());
+            completedSteps = 2;
 
-            // ── STEP 3: S3 Contract Upload ──────────
+            // ── STEP 3: S3 ──────────────────────────
             if(CircuitBreakerService.isCircuitOpen('S3')) {
+                failedSystem = 'S3';
+                failedStep = 3;
                 throw new NexusIQException('S3 Circuit OPEN — fast fail');
             }
             HttpRequest s3Req = new HttpRequest();
@@ -65,12 +75,15 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             HttpResponse s3Res = new Http().send(s3Req);
             if(s3Res.getStatusCode() != 200) {
                 failedSystem = 'S3';
+                failedStep = 3;
                 throw new NexusIQException('S3 failed: ' + s3Res.getStatusCode());
             }
-            NexusIQUtils.log(corrId, 'S3', 'SUCCESS', 'Contract uploaded', null, s3Res.getBody());
+            completedSteps = 3;
 
-            // ── STEP 4: Twilio SMS ──────────────────
+            // ── STEP 4: Twilio ──────────────────────
             if(CircuitBreakerService.isCircuitOpen('Twilio')) {
+                failedSystem = 'Twilio';
+                failedStep = 4;
                 throw new NexusIQException('Twilio Circuit OPEN — fast fail');
             }
             HttpRequest twilioReq = new HttpRequest();
@@ -85,9 +98,10 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             HttpResponse twilioRes = new Http().send(twilioReq);
             if(twilioRes.getStatusCode() != 200) {
                 failedSystem = 'Twilio';
+                failedStep = 4;
                 throw new NexusIQException('Twilio failed: ' + twilioRes.getStatusCode());
             }
-            NexusIQUtils.log(corrId, 'Twilio', 'SUCCESS', 'SMS sent', null, twilioRes.getBody());
+            completedSteps = 4;
 
         } catch(Exception e) {
             success = false;
@@ -96,55 +110,46 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
         }
 
         // ── SAARE CALLOUTS KE BAAD — DML ───────────
+        String sagaPayload = '{"item":"' + order.Item__c + 
+            '","qty":' + order.Quantity__c + 
+            ',"customer":"' + order.Customer_Name__c + '"}';
+
         if(success) {
-            // CB Success update
             CircuitBreakerService.recordSuccess('SAP');
             CircuitBreakerService.recordSuccess('Stripe');
             CircuitBreakerService.recordSuccess('S3');
             CircuitBreakerService.recordSuccess('Twilio');
 
-            // SAGA start + complete
-            SagaOrchestratorService.startSaga(corrId, 4,
-                '{"item":"' + order.Item__c + '","qty":' + 
-                order.Quantity__c + ',"customer":"' + 
-                order.Customer_Name__c + '"}');
+            // SAGA start + complete — DML after callouts
+            SagaOrchestratorService.startSaga(corrId, 4, sagaPayload);
             SagaOrchestratorService.completeStep(corrId, 1);
             SagaOrchestratorService.completeStep(corrId, 2);
             SagaOrchestratorService.completeStep(corrId, 3);
             SagaOrchestratorService.completeStep(corrId, 4);
 
-            // Logs flush
             NexusIQUtils.flushLogs();
 
-            // Order Completed
             NexusIQ_Order__c orderToUpdate = new NexusIQ_Order__c(
                 Id = order.Id,
                 Status__c = 'Completed',
                 Correlation_Id__c = corrId,
-                Error_Message__c = '' 
+                Error_Message__c = ''
             );
             update orderToUpdate;
 
         } else {
-            // CB Failure update
+            // SAGA start + fail — DML after callouts
+            SagaOrchestratorService.startSaga(corrId, 4, sagaPayload);
+            SagaOrchestratorService.failSagaAtStep(
+                corrId, errorMessage, completedSteps, failedSystem);
+
             if(String.isNotBlank(failedSystem)) {
-                String orderPayload = '{"item":"' + order.Item__c + 
-                     '","qty":' + order.Quantity__c + 
-                     ',"customer":"' + order.Customer_Name__c + 
-                     '","amount":' + order.Amount__c + 
-                     ',"orderId":"' + order.Id + '"}';
-                CircuitBreakerService.recordFailure(failedSystem, corrId, orderPayload);
+                CircuitBreakerService.recordFailure(
+                    failedSystem, corrId, buildPayload(corrId));
             }
 
-            // SAGA fail
-            SagaOrchestratorService.startSaga(corrId, 4,
-                '{"item":"' + order.Item__c + '","qty":' + 
-                order.Quantity__c + ',"customer":"' + 
-                order.Customer_Name__c + '"}');
-            SagaOrchestratorService.failSaga(corrId, errorMessage);
             NexusIQUtils.flushLogs();
 
-            // Order Failed
             NexusIQ_Order__c orderToUpdate = new NexusIQ_Order__c(
                 Id = order.Id,
                 Status__c = 'Failed',
@@ -153,6 +158,14 @@ public class NexusIQOrderQueueable implements Queueable, Database.AllowsCallouts
             );
             update orderToUpdate;
         }
+    }
+
+    private String buildPayload(String corrId) {
+        return '{"item":"' + order.Item__c + 
+               '","qty":' + order.Quantity__c + 
+               ',"customer":"' + order.Customer_Name__c + 
+               '","amount":' + order.Amount__c + 
+               ',"orderId":"' + order.Id + '"}';
     }
     
     public class NexusIQException extends Exception {}

@@ -5,11 +5,12 @@ public class CircuitBreakerQueueable implements Queueable {
     private String correlationId;
     private String payload;
     
-    public CircuitBreakerQueueable(String systemName, String action, String correlationId, String payload) {
-        this.systemName = systemName;
-        this.action = action;
+    public CircuitBreakerQueueable(String systemName, String action, 
+                                    String correlationId, String payload) {
+        this.systemName    = systemName;
+        this.action        = action;
         this.correlationId = correlationId;
-        this.payload = payload;
+        this.payload       = payload;
     }
     
     public void execute(QueueableContext context) {
@@ -21,7 +22,9 @@ public class CircuitBreakerQueueable implements Queueable {
             CircuitBreakerService.recordSuccess(systemName);
         }
         
-        NexusIQUtils.log(correlationId, 'Queueable completed: ' + action + ' | System: ' + systemName);
+        // FIXED — 6 params
+        NexusIQUtils.log(correlationId, systemName, 
+            'SUCCESS', 'Queueable completed: ' + action, null, null);
     }
     
     private void createDLQEntry() {
