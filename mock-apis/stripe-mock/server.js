@@ -5,6 +5,24 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+// ─────────────────────────────────────
+// GLOBAL FAIL MODE
+// ─────────────────────────────────────
+let globalFailMode = false;
+
+app.post('/api/stripe/fail-mode/on', (req, res) => {
+  globalFailMode = true;
+  console.log('[STRIPE MOCK] ❌ FAIL MODE ON');
+  res.json({ status: 'FAIL_MODE_ON', message: 'Stripe will now return 402' });
+});
+
+app.post('/api/stripe/fail-mode/off', (req, res) => {
+  globalFailMode = false;
+  console.log('[STRIPE MOCK] ✅ FAIL MODE OFF');
+  res.json({ status: 'FAIL_MODE_OFF', message: 'Stripe back to normal' });
+});
+
 // ─────────────────────────────────────
 // HEALTH CHECK
 // ─────────────────────────────────────
@@ -36,7 +54,14 @@ app.post('/api/stripe/charge', (req, res) => {
   const simulateFailure = req.body.simulateFailure === true;
 
   console.log(`[STRIPE MOCK] Charge | CorrID: ${correlationId} | Amount: ${amount} | Customer: ${customer}`);
-
+if (globalFailMode) {
+    return res.status(402).json({
+      success: false,
+      correlationId,
+      error: 'CARD_DECLINED',
+      message: 'Stripe payment failed — global fail mode ON'
+    });
+  }
   if (simulateFailure) {
     return res.status(402).json({
       success: false,
