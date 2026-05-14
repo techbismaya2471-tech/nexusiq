@@ -83,12 +83,13 @@ public class DLQProcessor implements Schedulable,
     dlq.Retry_Count__c = retryCount;
     
     // ── CB Failure count++ ─────────────
-    CircuitBreakerService.recordFailure(
-        dlq.System_Name__c, 
-        newCorrId, 
-        dlq.Payload__c
-    );
-
+    // CircuitBreakerService.recordFailure(
+    //     dlq.System_Name__c, 
+    //     newCorrId, 
+    //     dlq.Payload__c
+    // );
+        CircuitBreakerService.recordFailureNoDLQ(
+            dlq.System_Name__c);
     if(retryCount >= maxRetries) {
         dlq.Status__c = 'DEAD';
         dlq.Error_Message__c = 'Max retries (' + maxRetries + 

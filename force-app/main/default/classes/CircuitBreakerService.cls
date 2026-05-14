@@ -12,12 +12,11 @@ public class CircuitBreakerService extends NexusIQServiceBase {
             }
             return true;
         }
-        if(cb.Status__c == 'HALF_OPEN') {
-            return false;
-        }
+        if(cb.Status__c == 'HALF_OPEN') return false;
         return false;
     }
     
+    // ORDER fail pe — DLQ entry + CB count
     public static void recordFailure(String systemName, String correlationId, String payload) {
         Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
         if(cb == null) return;
@@ -25,7 +24,7 @@ public class CircuitBreakerService extends NexusIQServiceBase {
         cb.Failure_Count__c = (cb.Failure_Count__c == null ? 0 : cb.Failure_Count__c) + 1;
         cb.Last_Failure_Time__c = DateTime.now();
 
-        // ── HAR FAILURE PE DLQ ENTRY ──────────────
+        // DLQ entry — sirf new order failure pe
         List<Dead_Letter_Queue__c> existing = [
             SELECT Id FROM Dead_Letter_Queue__c
             WHERE Correlation_Id__c = :correlationId
@@ -45,19 +44,36 @@ public class CircuitBreakerService extends NexusIQServiceBase {
             insert dlq;
         }
         
-        // ── CB THRESHOLD CHECK ────────────────────
         if(cb.Failure_Count__c >= FAILURE_THRESHOLD) {
             cb.Status__c = 'OPEN';
             cb.Retry_After__c = DateTime.now().addMinutes(RETRY_MINUTES);
-             // FIXED — Batch context check!
+            System.debug('NexusIQ Circuit OPENED for: ' + systemName);
             if(!System.isBatch()) {
                 System.enqueueJob(new CircuitBreakerQueueable(
                     systemName, 'OPEN', correlationId, payload));
             }
-            System.debug('NexusIQ Circuit OPENED for: ' + systemName);
-            // System.enqueueJob(new CircuitBreakerQueueable(
-            //     systemName, 'OPEN', correlationId, payload));
             NexusIQEventPublisher.publishCircuitOpen(correlationId, systemName);
+        }
+        update cb;
+    }
+    
+    // DLQ RETRY fail pe — sirf CB count, DLQ entry NAHI!
+    public static void recordFailureNoDLQ(String systemName) {
+        Circuit_Breaker__c cb = NexusIQSelectorBase.getCircuitBreaker(systemName);
+        if(cb == null) return;
+        
+        cb.Failure_Count__c = (cb.Failure_Count__c == null ? 0 : cb.Failure_Count__c) + 1;
+        cb.Last_Failure_Time__c = DateTime.now();
+        
+        if(cb.Failure_Count__c >= FAILURE_THRESHOLD) {
+            cb.Status__c = 'OPEN';
+            cb.Retry_After__c = DateTime.now().addMinutes(RETRY_MINUTES);
+            System.debug('NexusIQ Circuit OPENED (DLQ retry) for: ' + systemName);
+            if(!System.isBatch()) {
+                System.enqueueJob(new CircuitBreakerQueueable(
+                    systemName, 'OPEN', 'DLQ-RETRY', null));
+            }
+            NexusIQEventPublisher.publishCircuitOpen('DLQ-RETRY', systemName);
         }
         update cb;
     }

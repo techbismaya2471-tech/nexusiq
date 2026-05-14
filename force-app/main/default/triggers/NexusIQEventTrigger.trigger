@@ -22,6 +22,7 @@ trigger NexusIQEventTrigger on NexusIQ_Event__e (after insert) {
         // Circuit Breaker open hua
         if(eventType == 'CIRCUIT_OPEN') {
             System.debug('NexusIQ Circuit Open Event: ' + systemName);
+            System.enqueueJob(new NexusIQAlertQueueable(systemName, correlationId)); 
         }
     }
 }

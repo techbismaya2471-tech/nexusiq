@@ -1,4 +1,6 @@
-import { LightningElement, track, wire } from 'lwc';
+import { LightningElement, track } from 'lwc';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import { subscribe, unsubscribe, onError } from 'lightning/empApi';
 import getCircuitBreakerStatus from '@salesforce/apex/NexusIQDashboardController.getCircuitBreakerStatus';
 import getRecentLogs from '@salesforce/apex/NexusIQDashboardController.getRecentLogs';
 import getRecentSagas from '@salesforce/apex/NexusIQDashboardController.getRecentSagas';
@@ -14,9 +16,12 @@ export default class NexusIQDashboard extends LightningElement {
     @track lastRefreshed = '';
 
     refreshInterval;
+    subscription = {};
 
+    // ── LIFECYCLE ──────────────────────────────
     connectedCallback() {
         this.loadAllData();
+        this.subscribeToEvents();
         this.refreshInterval = setInterval(() => {
             this.loadAllData();
         }, 30000);
@@ -24,11 +29,63 @@ export default class NexusIQDashboard extends LightningElement {
 
     disconnectedCallback() {
         clearInterval(this.refreshInterval);
+        unsubscribe(this.subscription);
     }
 
+    // ── PLATFORM EVENT SUBSCRIBER ──────────────
+    subscribeToEvents() {
+        const channel = '/event/NexusIQ_Event__e';
+        
+        subscribe(channel, -1, (event) => {
+            const payload = event.data.payload;
+            const eventType = payload.Event_Type__c;
+            const systemName = payload.System_Name__c;
+
+            // CIRCUIT_OPEN → Toast show karo!
+            if(eventType === 'CIRCUIT_OPEN') {
+                this.showAlert(
+                    '⚠️ Circuit Breaker OPEN!',
+                    systemName + ' system is DOWN — Immediate action required!',
+                    'error'
+                );
+                // Dashboard refresh karo
+                this.loadAllData();
+            }
+
+            // SAGA_FAILED → Warning toast
+            if(eventType === 'SAGA_FAILED') {
+                this.showAlert(
+                    '⚠️ SAGA Failed!',
+                    'Transaction failed for ' + systemName,
+                    'warning'
+                );
+                this.loadAllData();
+            }
+
+        }).then(sub => {
+            this.subscription = sub;
+        });
+
+        onError(error => {
+            console.error('EMP API Error: ', error);
+        });
+    }
+
+    // ── TOAST HELPER ───────────────────────────
+    showAlert(title, message, variant) {
+        this.dispatchEvent(new ShowToastEvent({
+            title,
+            message,
+            variant,   // error/warning/success/info
+            mode: 'sticky' // Admin close kare tab tak dikhe!
+        }));
+    }
+
+    // ── DATA LOADING ───────────────────────────
     loadAllData() {
         this.isLoading = true;
-        this.lastRefreshed = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+        this.lastRefreshed = new Date().toLocaleTimeString(
+            'en-IN', { timeZone: 'Asia/Kolkata' });
 
         Promise.all([
             getCircuitBreakerStatus(),
@@ -50,7 +107,8 @@ export default class NexusIQDashboard extends LightningElement {
                 ...log,
                 isSuccess: log.status === 'SUCCESS',
                 isFailed: log.status === 'FAILED',
-                statusClass: log.status === 'SUCCESS' ? 'log-success' : 'log-failed'
+                statusClass: log.status === 'SUCCESS' ? 
+                    'log-success' : 'log-failed'
             }));
 
             this.recentSagas = sagas.map(saga => ({
@@ -59,9 +117,9 @@ export default class NexusIQDashboard extends LightningElement {
                 isCompleted: saga.status === 'COMPLETED',
                 isFailed: saga.status === 'FAILED',
                 progressPercent: saga.totalSteps > 0 ?
-                        Math.round((saga.currentStep / saga.totalSteps) * 100) : 0,
-                        progressStyle: 'width:' + (saga.totalSteps > 0 ?
-                        Math.round((saga.currentStep / saga.totalSteps) * 100) : 0) + '%'
+                    Math.round((saga.currentStep / saga.totalSteps) * 100) : 0,
+                progressStyle: 'width:' + (saga.totalSteps > 0 ?
+                    Math.round((saga.currentStep / saga.totalSteps) * 100) : 0) + '%'
             }));
 
             this.summary = summary;
@@ -69,7 +127,7 @@ export default class NexusIQDashboard extends LightningElement {
             this.error = undefined;
         })
         .catch(error => {
-            this.error = error.body?.message || 'Error loading dashboard data';
+            this.error = error.body?.message || 'Error loading dashboard';
             this.isLoading = false;
         });
     }
