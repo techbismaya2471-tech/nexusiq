@@ -20,7 +20,7 @@ jobs:
           sf --version
       - name: Authenticate to Salesforce
         run: |
-          echo "${{ secrets.SF_PRIVATE_KEY }}" > server.key
+          echo "${{ secrets.SF_PRIVATE_KEY }}" | base64 --decode > server.key
           sf org login jwt \
             --client-id ${{ secrets.SF_CONSUMER_KEY }} \
             --jwt-key-file server.key \
