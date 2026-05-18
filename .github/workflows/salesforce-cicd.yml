@@ -25,7 +25,7 @@ jobs:
             --client-id ${{ secrets.SF_CONSUMER_KEY }} \
             --jwt-key-file server.key \
             --username ${{ secrets.SF_USERNAME }} \
-            --instance-url https://login.salesforce.com \
+            --instance-url https://pqr-1b-dev-ed.develop.my.salesforce.com \
             --set-default
       - name: Deploy to Salesforce
         run: |
